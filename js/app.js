@@ -2,7 +2,7 @@
  * app.js - Application Bootstrapped
  * 
  * Application Entry Point:
- * - Initializes IndexedDB connection
+ * - PHP API backend for URL shortener
  * - Checks for redirect mode first (before UI)
  * - If redirect, attempts redirect and exits
  * - Otherwise, initializes the main UI
@@ -11,8 +11,8 @@
  * Non-blocking initialization for fast redirects.
  */
 
-import { openDB, addURL, getAllURLs, deleteURL, clearAllURLs, shortIdExists } from './db.js';
-import { generateShortId, constructShortURL } from './shortener.js';
+import { addURL, getAllURLs, deleteURL, clearAllURLs, shortIdExists } from './db.js';
+import { constructShortURL } from './shortener.js';
 import { isRedirectMode, redirectById, getShortIdFromURL } from './router.js';
 import { renderHistory, setupEventListeners, showToast, setLoading, updateURLCount, showClearButton } from './ui.js';
 
@@ -45,8 +45,7 @@ export async function initApp() {
  */
 async function initializeUI() {
   try {
-    // Initialize IndexedDB
-    await openDB();
+    // No need to initialize IndexedDB - using PHP API instead
 
     // Set up event handlers
     setupEventListeners({
@@ -73,18 +72,25 @@ async function handleShorten(normalizedURL) {
   setLoading(true);
 
   try {
-    // Generate a unique short ID
-    const shortId = await generateShortId(shortIdExists);
-
-    // Add to database
-    await addURL({
-      shortId,
+    // Add to database via API
+    const id = await addURL({
+      shortId: '', // Will be assigned by the server
       originalUrl: normalizedURL,
       createdAt: Date.now()
     });
 
-    // Show success message with the short URL
-    const shortURL = constructShortURL(shortId);
+    // Fetch the short URL from the API
+    const entries = await getAllURLs();
+    const newEntry = entries.find(e => e.originalUrl === normalizedURL);
+    
+    // Show success message
+    let shortURL;
+    if (newEntry) {
+      shortURL = constructShortURL(newEntry.shortId);
+    } else {
+      shortURL = 'URL shortened successfully';
+    }
+    
     showToast(`URL shortened: ${shortURL}`, 'success');
 
     // Clear input

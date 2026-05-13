@@ -1,74 +1,18 @@
 /**
- * db.js - IndexedDB Module
+ * db.js - API Module
  * 
- * IndexedDB Schema Design:
- * - Database: 'url-shortener-db'
- * - Version: 1
- * - Object Store: 'urls'
- *   - Key: 'id' (auto-increment integer, converted to Base62 short ID)
- *   - Indexes:
- *     - 'shortId' (unique): For O(1) lookup by short URL ID
- *     - 'originalUrl': Full URL that was shortened
- *     - 'createdAt': Timestamp of creation (for sorting)
- * 
- * The schema uses natural keys with indexed shortId for fast lookups.
- * This ensures O(1) redirect performance.
+ * API calls to PHP backend for URL shortener.
+ * Handles all CRUD operations via REST API.
  */
 
-const DB_NAME = 'url-shortener-db';
-const DB_VERSION = 1;
-const STORE_NAME = 'urls';
-
-let dbInstance = null;
+const API_BASE = '';
 
 /**
- * Opens and returns the IndexedDB connection
- * Handles version upgrades for schema migrations
- * @returns {Promise<IDBDatabase>}
+ * Opens connection (no-op for API, kept for compatibility)
+ * @returns {Promise<void>}
  */
 export async function openDB() {
-  return new Promise((resolve, reject) => {
-    // If already connected, return cached instance
-    if (dbInstance) {
-      resolve(dbInstance);
-      return;
-    }
-
-    const request = indexedDB.open(DB_NAME, DB_VERSION);
-
-    // Handle database upgrades (schema migrations)
-    request.onupgradeneeded = (event) => {
-      const db = event.target.result;
-
-      // Create URLs object store if it doesn't exist
-      if (!db.objectStoreNames.contains(STORE_NAME)) {
-        const store = db.createObjectStore(STORE_NAME, {
-          keyPath: 'id',
-          autoIncrement: true
-        });
-
-        // Create unique index on shortId for O(1) lookups
-        store.createIndex('shortId', 'shortId', { unique: true });
-
-        // Create index on originalUrl for searching
-        store.createIndex('originalUrl', 'originalUrl', { unique: false });
-
-        // Create index on createdAt for sorting
-        store.createIndex('createdAt', 'createdAt', { unique: false });
-      }
-    };
-
-    // Handle successful database open
-    request.onsuccess = (event) => {
-      dbInstance = event.target.result;
-      resolve(dbInstance);
-    };
-
-    // Handle errors
-    request.onerror = (event) => {
-      reject(new Error(`IndexedDB error: ${event.target.error?.message || 'Unknown error'}`));
-    };
-  });
+  return Promise.resolve();
 }
 
 /**
@@ -77,29 +21,19 @@ export async function openDB() {
  * @returns {Promise<number>} - The auto-generated ID
  */
 export async function addURL(urlEntry) {
-  const db = await openDB();
-  
-  return new Promise((resolve, reject) => {
-    const transaction = db.transaction([STORE_NAME], 'readwrite');
-    const store = transaction.objectStore(STORE_NAME);
-
-    // Include shortId in the record
-    const record = {
-      shortId: urlEntry.shortId,
-      originalUrl: urlEntry.originalUrl,
-      createdAt: urlEntry.createdAt || Date.now()
-    };
-
-    const request = store.add(record);
-
-    request.onsuccess = () => {
-      resolve(request.result);
-    };
-
-    request.onerror = (event) => {
-      reject(new Error(`Failed to add URL: ${event.target.error?.message || 'Constraint error'}`));
-    };
+  const response = await fetch(`${API_BASE}/api/shorten`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ url: urlEntry.originalUrl })
   });
+  
+  if (!response.ok) {
+    const error = await response.json();
+    throw new Error(error.error || 'Failed to add URL');
+  }
+  
+  const result = await response.json();
+  return result.id;
 }
 
 /**
@@ -108,22 +42,23 @@ export async function addURL(urlEntry) {
  * @returns {Promise<Object|null>} - The URL entry or null if not found
  */
 export async function getURLByShortId(shortId) {
-  const db = await openDB();
-
-  return new Promise((resolve, reject) => {
-    const transaction = db.transaction([STORE_NAME], 'readonly');
-    const store = transaction.objectStore(STORE_NAME);
-    const index = store.index('shortId');
-    const request = index.get(shortId);
-
-    request.onsuccess = () => {
-      resolve(request.result || null);
-    };
-
-    request.onerror = (event) => {
-      reject(new Error(`Failed to get URL: ${event.target.error?.message}`));
-    };
-  });
+  const response = await fetch(`${API_BASE}/api/redirect/${shortId}`);
+  
+  if (response.status === 404) {
+    return null;
+  }
+  
+  if (!response.ok) {
+    throw new Error('Failed to get URL');
+  }
+  
+  const result = await response.json();
+  return {
+    id: 0,
+    shortId: shortId,
+    originalUrl: result.original_url,
+    createdAt: Date.now()
+  };
 }
 
 /**
@@ -131,24 +66,14 @@ export async function getURLByShortId(shortId) {
  * @returns {Promise<Array>} - Array of URL entries
  */
 export async function getAllURLs() {
-  const db = await openDB();
-
-  return new Promise((resolve, reject) => {
-    const transaction = db.transaction([STORE_NAME], 'readonly');
-    const store = transaction.objectStore(STORE_NAME);
-    const request = store.getAll();
-
-    request.onsuccess = () => {
-      // Sort by createdAt descending (newest first)
-      const entries = request.result || [];
-      entries.sort((a, b) => b.createdAt - a.createdAt);
-      resolve(entries);
-    };
-
-    request.onerror = (event) => {
-      reject(new Error(`Failed to get URLs: ${event.target.error?.message}`));
-    };
-  });
+  const response = await fetch(`${API_BASE}/api/urls`);
+  
+  if (!response.ok) {
+    throw new Error('Failed to get URLs');
+  }
+  
+  const result = await response.json();
+  return result.urls || [];
 }
 
 /**
@@ -157,21 +82,13 @@ export async function getAllURLs() {
  * @returns {Promise<void>}
  */
 export async function deleteURL(id) {
-  const db = await openDB();
-
-  return new Promise((resolve, reject) => {
-    const transaction = db.transaction([STORE_NAME], 'readwrite');
-    const store = transaction.objectStore(STORE_NAME);
-    const request = store.delete(id);
-
-    request.onsuccess = () => {
-      resolve();
-    };
-
-    request.onerror = (event) => {
-      reject(new Error(`Failed to delete URL: ${event.target.error?.message}`));
-    };
+  const response = await fetch(`${API_BASE}/api/urls/${id}`, {
+    method: 'DELETE'
   });
+  
+  if (!response.ok) {
+    throw new Error('Failed to delete URL');
+  }
 }
 
 /**
@@ -180,6 +97,7 @@ export async function deleteURL(id) {
  * @returns {Promise<void>}
  */
 export async function deleteURLByShortId(shortId) {
+  // Need to get the ID first, then delete
   const entry = await getURLByShortId(shortId);
   if (entry) {
     await deleteURL(entry.id);
@@ -191,21 +109,13 @@ export async function deleteURLByShortId(shortId) {
  * @returns {Promise<void>}
  */
 export async function clearAllURLs() {
-  const db = await openDB();
-
-  return new Promise((resolve, reject) => {
-    const transaction = db.transaction([STORE_NAME], 'readwrite');
-    const store = transaction.objectStore(STORE_NAME);
-    const request = store.clear();
-
-    request.onsuccess = () => {
-      resolve();
-    };
-
-    request.onerror = (event) => {
-      reject(new Error(`Failed to clear URLs: ${event.target.error?.message}`));
-    };
+  const response = await fetch(`${API_BASE}/api/clear`, {
+    method: 'DELETE'
   });
+  
+  if (!response.ok) {
+    throw new Error('Failed to clear URLs');
+  }
 }
 
 /**
@@ -223,29 +133,19 @@ export async function shortIdExists(shortId) {
  * @returns {Promise<number>}
  */
 export async function getURLCount() {
-  const db = await openDB();
-
-  return new Promise((resolve, reject) => {
-    const transaction = db.transaction([STORE_NAME], 'readonly');
-    const store = transaction.objectStore(STORE_NAME);
-    const request = store.count();
-
-    request.onsuccess = () => {
-      resolve(request.result);
-    };
-
-    request.onerror = (event) => {
-      reject(new Error(`Failed to count URLs: ${event.target.error?.message}`));
-    };
-  });
+  const response = await fetch(`${API_BASE}/api/count`);
+  
+  if (!response.ok) {
+    throw new Error('Failed to count URLs');
+  }
+  
+  const result = await response.json();
+  return result.count;
 }
 
 /**
- * Close the database connection
+ * Close the database connection (no-op for API)
  */
 export function closeDB() {
-  if (dbInstance) {
-    dbInstance.close();
-    dbInstance = null;
-  }
+  // No-op for API
 }

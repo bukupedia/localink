@@ -4,11 +4,8 @@
  * Routing Logic:
  * - Parses URL search params for ?id= parameter
  * - On app load, checks for redirect mode via query param
- * - Uses window.location.replace() for redirect (no history entry)
+ * - Uses PHP backend to resolve the redirect
  * - Handles missing/invalid IDs gracefully with error page
- * 
- * The router is executed immediately on app initialization
- * to ensure instant redirects without UI flash.
  */
 
 import { getURLByShortId } from './db.js';
@@ -32,7 +29,7 @@ export function isRedirectMode() {
 
 /**
  * Redirect to the original URL by short ID
- * Uses window.location.replace() to avoid creating history entry
+ * Fetches original URL from API and redirects
  * @returns {Promise<boolean>} - True if redirect succeeded
  */
 export async function redirectById() {
